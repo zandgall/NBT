@@ -1,3 +1,9 @@
+/*
+GZNBT is a small helper tool that interacts with zlib, and allows quick inflation and deflation of data, requires #define NBT_GZNBT_INCLUDE on first include
+Tailored for the NBT library
+*/
+
+
 #pragma once
 #include <zlib.h>
 #include <vector>
@@ -6,8 +12,8 @@
 namespace nbt {
 	int deflate(char* in, size_t length, std::vector<char>* out, int level);
 	int inflate(char* in, size_t length, std::vector<char>* out);
-#ifdef NBT_INCLUDE
-#undef NBT_INCLUDE
+#ifdef NBT_GZNBT_INCLUDE
+#undef NBT_GZNBT_INCLUDE
 	int deflate(char* in, size_t length, std::vector<char>* out, int level) {
 		z_stream stream;
 		stream.zalloc = Z_NULL;
@@ -50,7 +56,7 @@ namespace nbt {
 		stream.zalloc = Z_NULL;
 		stream.zfree = Z_NULL;
 		stream.opaque = Z_NULL;
-		int ret = inflateInit2(&stream, 31);
+		int ret = inflateInit2(&stream, 32 | MAX_WBITS);
 		if (ret != Z_OK)
 			return ret;
 		size_t index = 0;
