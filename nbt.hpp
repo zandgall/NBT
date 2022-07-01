@@ -1,13 +1,36 @@
+/*
+
+THE CURRENT CODE IS NOT FULLY COMMENTED. There are a few comments here and there, but it is very much a work in progress. Enter at your own risk of confusion!
+
+This is a header only library, that defines the NBT data system. 
+Each tag type is defined in a class, as a child of the nbt::tag super class. 
+
+Every tag type holds an ID, a name, and a unique data type, which is given by the the name of the tag. (Byte tags store bytes, String tags store strings, etc.)
+You may provide a tag with NBT file data in order to be interpretted into the proper data types. You may also push NBT file data into a buffer.
+
+An NBT Compound tag may be used, just like a JSON object, to store various primitive types in the form of other NBT tags.
+The Compound tag is the first place to start.
+
+ - Zander
+
+- Video essay on the specifics of NBT - https://youtu.be/12PAtF2Ih_c
+- Wiki.vg documentation on NBT - https://wiki.vg/NBT
+- Original NBT specification (archive) - https://web.archive.org/web/20110723210920/http://www.minecraft.net/docs/NBT.txt
+
+
+Use NBT_INCLUDE only ONCE in your project, in order to define otherwise undefined functions.
+
+Preprocessor options:
+NBT_LITTLE_ENDIAN - Uses Little Endian to represent data, rather than the default Big Endian
+NBT_COMPILE - Allows access to 'compilation' functions, that return a string detailing the contents of a tag. Helpful for debugging.
+NBT_COMPILE_FULL_ARRAYS - By default, any array tags will say "ArrayTag(100 elements)" instead of listing each element individually. If you wish to see each element, define this.
+NBT_SHORTHAND - In order to interact with different forms of data, tag_p will dynamic_cast from a tag pointer, to a specific tag reference. Shorthand adds extra shorter functions to allow you to call "tag_p.i()" or "tag_p.it()" instead of "tag_p._int()" or "tag_p._inttag()"
+NBT_THROW_ENDLESS - Enables an exception to be thrown whenever a compound tag attempts to write it's data when it doesn't have an end tag.
+NBT_IGNORE_MUTF - Ignores the "Modified UTF-8" specification, and instead only deals in the base UTF-8 standard, default C++ string.
+NBT_INCLUDE - Required on first include.
+*/
+
 #pragma once
-
-// TODO: Clean up definitions and other preprocessor code
-// TODO: Clean up naming system
-// TODO: Clean exceptions code
-// TODO: Simplify functions, double check value_bytes output
-
-// TODO: Check and throw error on overflows. (Names with lengths longer than UINT16_MAX, arrays+lists with more elements than UINT_MAX)
-// TODO: Decide on proper constructors
-// TODO: Decide on proper operations
 
 #include <vector>
 #include <map>
@@ -15,12 +38,28 @@
 #include <typeinfo>
 #include <string>
 #include <iostream>
-#ifndef _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
-#error NBT Makes use of <codecvt> in order to properly decode and encode Java Modified UTF-8. In order to make use of this, you will need to define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING before any STL includes, or in the debug declarations of your project.
-#endif
-#include <codecvt>
 
-constexpr auto NBT_END_TAG_NAME = "\\NBT_END_TAG_NAME_CONSTANT";
+// Codecvt is a deprecated standard header. However, there was no equivalant given in the standard library that can convert a 8-bit string (const char*), to a 32-bit string (char32_t*). 
+#ifndef NBT_IGNORE_MUTF
+	#ifndef defined _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
+	#error NBT Makes use of <codecvt> in order to properly decode and encode Java Modified UTF-8. In order to make use of this, you will need to define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING before any STL includes, or in the debug declarations of your project. You may also #define NBT_IGNORE_MUTF instead to use default UTF-8 Text encodings.
+	#endif
+	#include <codecvt>
+#endif
+
+/*
+All NBT tags are required to contain a name in order to be stored by a Compound Tag.
+End Tags do not read a given file's contents for a name, so instead they use this placeholder name.
+4 '255' character values are provided, in order to sort compound tags properly so that end tags appear at the end of the given list.
+*/
+constexpr const char* NBT_END_TAG_NAME = "\255\255\255\255 \\NBT_END_TAG_NAME_CONSTANT";
+
+/* 
+The NBT_BYPASS_ID is a flag that always passes any ID checks. 
+A tag will check that the ID it is loading, is the correct ID for it's type.
+
+(i.e, byte_tags will check for ID '1' in the file, and if it isn't 1, throws invalid_tag_id_exception)
+*/
 constexpr int8_t NBT_BYPASS_ID = 127;
 
 namespace nbt {
@@ -130,28 +169,30 @@ namespace nbt {
 
 	class tag {
 	public:
-		// The NBT id of the
+		// The NBT id of the tag
 		int8_t id = -1;
+
 		// The name of the tag
 		std::string name = "";
+
 		/// <summary>
 		/// Load data to this tag from the list of bytes, starting at the given offset. Used majorly by nbt::compound tags to load sub-tags
 		/// </summary>
-		/// <param name="bytes">List of NBT data. Equivelent to a decompressed .dat file.</param>
-		/// <param name="offset">The position to start reading data from</param>
+		/// <param name="bytes">- List of NBT data. Equivelent to a decompressed .dat file.</param>
+		/// <param name="offset">- The position to start reading data from</param>
 		/// <returns>Where the current tag's data ends, and the next tag's data begins.</returns>
 		virtual size_t load(char* bytes, size_t offset = 0) = 0;
 		/// <summary>
 		/// Writes tag's data to an output buffer. Buffer is able to then be saved to a file or loaded by other tags.
 		/// </summary>
-		/// <param name="buffer">Where the tag's data will be written to, make sure it has appropriate space. If given nullptr, this function can be used to get the exact length required for a buffer (FASTER+SAFER TO USE WRITE WITH A LIST INSTEAD OF CHAR ARRAY)</param>
-		/// <param name="offset">Where the tag should start writing data</param>
+		/// <param name="buffer">- Where the tag's data will be written to, make sure it has appropriate space. If given nullptr, this function can be used to get the exact length required for a buffer (FASTER+SAFER TO USE WRITE WITH A LIST INSTEAD OF CHAR ARRAY)</param>
+		/// <param name="offset">- Where the tag should start writing data</param>
 		/// <returns>Where the current tag's data ends, and the next tag's data should begin</returns>
 		virtual size_t write(char* buffer, size_t offset) = 0;
 		/// <summary>
 		/// Writes tag's data to an extendable output buffer. Buffer is able to then be saved to a file or loaded by other tags.
 		/// </summary>
-		/// <param name="buffer">Where the tag's data will be written to, pushing back the end of the buffer.</param>
+		/// <param name="buffer">- Where the tag's data will be written to, pushing back the end of the buffer.</param>
 		/// <returns>Where the current tag's data ends, and the next tag's data should begin</returns>
 		virtual size_t write(std::vector<char>& buffer) = 0;
 		virtual std::vector<char> value_bytes() = 0;
@@ -673,6 +714,7 @@ namespace nbt {
 	class compound;
 	class list;
 
+	// Interface class that lets you cast between types without unsafe casting, or having to write dynamic_cast<tagtype> every line
 	class tag_p {
 	public:
 		tag* value;
@@ -905,6 +947,13 @@ namespace nbt {
 		}
 	};
 
+	/*
+	The NBT Compound Tag is the starting point of all NBT datasets. It stores a list of Tags, referenced to by their names. Therefore, they store tags using an std::map.
+	Because all of the tags are unique classes, the Compound Tag instead stores pointers to the nbt::tag superclass in the form of the tag_p interface class.
+
+	tag_p is how you would mostly be interacting with the API, that would be where to read next.
+	*/
+
 	class compound : public tag {
 	public:
 		std::map<std::string, tag_p> tags;
@@ -916,12 +965,12 @@ namespace nbt {
 			this->tags = tags;
 			id = 10;
 		}
-		compound(std::map<std::string, tag_p> tags, std::string name) {
-			this->tags = tags;
+		compound(std::string name) {
 			this->name = name;
 			id = 10;
 		}
-		compound(std::string name) {
+		compound(std::map<std::string, tag_p> tags, std::string name) {
+			this->tags = tags;
 			this->name = name;
 			id = 10;
 		}
@@ -931,6 +980,7 @@ namespace nbt {
 			id = 10;
 		}
 		compound(tag* tag) {
+			// Note: Creates a new compound tag, and is not the same thing as a cast. Instead, use tag_p in order to cast between types.
 			compound* t = dynamic_cast<compound*>(tag);
 			this->tags = t->tags;
 			this->id = 10;
@@ -946,10 +996,10 @@ namespace nbt {
 		}
 
 		size_t load(char* bytes, size_t offset) {
-			// Make sure all tags are registered
+			// Make sure all tags are registered, required in order to use default tag types.
 			registerDefaultTags();
 
-			size_t off = loadDefault(bytes, offset);
+			size_t off = loadDefault(bytes, offset); // Loads default Tag header.
 			char t;
 			tag* tag;
 			while (true) {
@@ -967,39 +1017,45 @@ namespace nbt {
 			return off + 1;
 		}
 		size_t write(char* buffer, size_t offset) {
+			// Writes default tag header.
 			size_t off = writeDefault(buffer, offset);
 
-			//for (int i = 0; i < tags.size(); i++)
-			//	off = tags[i]->write(buffer, off);
+			// Loops through every stored tag, and call it's write function, unless it is an end tag, as that is written at the end of the compound tag.
 			for (auto i = tags.begin(); i != tags.end(); i++)
-				off = i->second->write(buffer, off);
-			if (tags.count(NBT_END_TAG_NAME) == 0) {
+				if (i->second->id!=0)
+					off = i->second->write(buffer, off);
+			// Compound Tags are required to provide an End Tag at the end of their definition, like a closing '}' for code bodies.
+			// If the option is given, then Compound tags will throw an endless_compound_exception if it does not contain an end tag.
 #ifdef NBT_THROW_ENDLESS
+			if (tags.count(NBT_END_TAG_NAME) == 0)
 				throw endless_compound_exception();
 #endif
-				buffer[off++] = 0x00;
-			}
+			buffer[off++] = 0x00; // Write end tag
 			return off;
 		}
 		size_t write(std::vector<char>& buffer) {
+			// See write(char*, size_t) comments
 			writeDefault(buffer);
 
 			for (auto i = tags.begin(); i != tags.end(); i++)
-				i->second->write(buffer);
+				if(i->second->id!=0)
+					i->second->write(buffer);
 
-			if (tags.count(NBT_END_TAG_NAME) == 0) {
 #ifdef NBT_THROW_ENDLESS
+			if (tags.count(NBT_END_TAG_NAME) == 0)
 				throw endless_compound_exception();
 #endif
-				buffer.push_back(0x00);
-			}
+			buffer.push_back(0x00);
 
 			return buffer.size();
 		}
 		std::vector<char> value_bytes() {
+			// Same as write(buffer), however it provides it's own buffer, and doesn't write it's own header. Rather, provides the written data of all contained tags.
 			std::vector<char> buffer = std::vector<char>();
 			for (auto i = tags.begin(); i != tags.end(); i++)
-				i->second.value->write(buffer);
+				if (i->second->id != 0)
+					i->second->write(buffer);
+			buffer.push_back(0x00);
 			return buffer;
 		}
 
@@ -1015,12 +1071,15 @@ namespace nbt {
 
 		// SYNTAX AND CODE SIMPLIFICATION
 
+		// compound["sub tag"]
 		tag_p operator[](const char* name) {
 			return get(name);
 		}
+		// compound().begin()
 		operator std::map<std::string, tag_p>() {
 			return tags;
 		}
+		// compound << new inttag()
 		void operator<<(tag_p t) {
 			tags.insert(std::make_pair(t->name, t));
 		}
@@ -1029,6 +1088,7 @@ namespace nbt {
 		}
 
 #ifdef NBT_COMPILE
+		// Returns a string that can be useful for debugging
 		std::string compilation(std::string regex = "") {
 			std::string out = regex + "CompoundTag(" + std::string(name) + "): " + std::to_string(tags.size()) + " tags {\n";
 			for (auto i = tags.begin(); i != tags.end(); i++) {
@@ -1041,8 +1101,7 @@ namespace nbt {
 			return out;
 		}
 		friend std::ostream& operator<<(std::ostream& left, compound& right) {
-			left << right.compilation();
-			return left;
+			return (left << right.compilation());
 		}
 #endif
 	private:
@@ -1101,40 +1160,14 @@ namespace nbt {
 		nbt::registeredDefaultTags = true;
 	}
 }
-//#define NBT_INCLUDE
+
 #ifdef NBT_INCLUDE
 #undef NBT_INCLUDE
-//namespace nbt {
-//	static void nbt::registerDefaultTags() {
-//		if (nbt::registeredDefaultTags)
-//			return;
-//
-//		registerTag<end>(0);
-//		registerTag<bytetag>(1);
-//		registerTag<ubytetag>(-1);
-//		registerTag<shorttag>(2);
-//		registerTag<ushorttag>(-2);
-//		registerTag<inttag>(3);
-//		registerTag<uinttag>(-3);
-//		registerTag<longtag>(4);
-//		registerTag<ulongtag>(-4);
-//		registerTag<floattag>(5);
-//		registerTag<doubletag>(6);
-//		registerTag<bytearray>(7);
-//		registerTag<ubytearray>(-7);
-//		registerTag<stringtag>(8);
-//		registerTag<list>(9);
-//		registerTag<compound>(10);
-//		registerTag<intarray>(11);
-//		registerTag<uintarray>(-11);
-//		registerTag<longarray>(12);
-//		registerTag<ulongarray>(-12);
-//
-//		nbt::registeredDefaultTags = true;
-//	}
-//}
 
 std::string nbt::utfToMutf(std::string utf) {
+#ifdef NTB_IGNORE_MUTF
+	return utf;
+#else
 	std::string out = "";
 	std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
 	std::u32string uni = converter.from_bytes(utf);
@@ -1172,9 +1205,13 @@ std::string nbt::utfToMutf(std::string utf) {
 		}
 	}
 	return out;
+#endif
 }
 
 std::string nbt::mutfToUtf(std::string mutf) {
+#ifdef NBT_IGNORE_MUTF
+	return mutf;
+#else
 	std::u32string out = U"";
 
 	for (int i = 0; i < mutf.size(); i++) {
@@ -1197,6 +1234,7 @@ std::string nbt::mutfToUtf(std::string mutf) {
 
 	std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
 	return converter.to_bytes(out);
+#endif
 }
 
 std::map<int8_t, std::string> nbt::tagNames = std::map<int8_t, std::string>();
