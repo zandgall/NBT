@@ -8,6 +8,8 @@ Each tag type is defined in a class, as a child of the nbt::tag super class.
 Every tag type holds an ID, a name, and a unique data type, which is given by the the name of the tag. (Byte tags store bytes, String tags store strings, etc.)
 You may provide a tag with NBT file data in order to be interpretted into the proper data types. You may also push NBT file data into a buffer.
 
+Strings in NBT use the Java Modified-UTF-8 codec. Don't ask me why, NBT was originally developed in Java, so they must use it and make life suck for the rest of us I suppose.
+
 An NBT Compound tag may be used, just like a JSON object, to store various primitive types in the form of other NBT tags.
 The Compound tag is the first place to start.
 
@@ -21,9 +23,9 @@ The Compound tag is the first place to start.
 Use NBT_INCLUDE only ONCE in your project, in order to define otherwise undefined functions.
 
 Preprocessor options:
-NBT_LITTLE_ENDIAN - Uses Little Endian to represent data, rather than the default Big Endian
 NBT_COMPILE - Allows access to 'compilation' functions, that return a string detailing the contents of a tag. Helpful for debugging.
 NBT_COMPILE_FULL_ARRAYS - By default, any array tags will say "ArrayTag(100 elements)" instead of listing each element individually. If you wish to see each element, define this.
+NBT_LITTLE_ENDIAN - Uses Little Endian to represent data, rather than the default Big Endian
 NBT_SHORTHAND - In order to interact with different forms of data, tag_p will dynamic_cast from a tag pointer, to a specific tag reference. Shorthand adds extra shorter functions to allow you to call "tag_p.i()" or "tag_p.it()" instead of "tag_p._int()" or "tag_p._inttag()"
 NBT_THROW_ENDLESS - Enables an exception to be thrown whenever a compound tag attempts to write it's data when it doesn't have an end tag.
 NBT_IGNORE_MUTF - Ignores the "Modified UTF-8" specification, and instead only deals in the base UTF-8 standard, default C++ string.
@@ -41,7 +43,7 @@ NBT_INCLUDE - Required on first include.
 
 // Codecvt is a deprecated standard header. However, there was no equivalant given in the standard library that can convert a 8-bit string (const char*), to a 32-bit string (char32_t*). 
 #ifndef NBT_IGNORE_MUTF
-	#ifndef defined _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
+	#ifndef _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
 	#error NBT Makes use of <codecvt> in order to properly decode and encode Java Modified UTF-8. In order to make use of this, you will need to define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING before any STL includes, or in the debug declarations of your project. You may also #define NBT_IGNORE_MUTF instead to use default UTF-8 Text encodings.
 	#endif
 	#include <codecvt>
@@ -52,17 +54,19 @@ All NBT tags are required to contain a name in order to be stored by a Compound 
 End Tags do not read a given file's contents for a name, so instead they use this placeholder name.
 4 '255' character values are provided, in order to sort compound tags properly so that end tags appear at the end of the given list.
 */
-constexpr const char* NBT_END_TAG_NAME = "\255\255\255\255 \\NBT_END_TAG_NAME_CONSTANT";
+constexpr const char* NBT_END_TAG_NAME = "\\NBT_END_TAG_NAME_CONSTANT";
 
 /* 
 The NBT_BYPASS_ID is a flag that always passes any ID checks. 
 A tag will check that the ID it is loading, is the correct ID for it's type.
 
-(i.e, byte_tags will check for ID '1' in the file, and if it isn't 1, throws invalid_tag_id_exception)
+(i.e, bytetags will check for ID '1' in the file, and if it isn't 1, throws invalid_tag_id_exception)
 */
 constexpr int8_t NBT_BYPASS_ID = 127;
 
 namespace nbt {
+	// Called if a tag reads data, and the ID it reads is incorrect
+	// i.e: bytetag, which has an ID of '1', reading data that returns the ID 2, will throw invalid_tag_id_exception
 	class invalid_tag_id_exception : public std::exception {
 	public:
 		char id, required_type;
@@ -77,6 +81,8 @@ namespace nbt {
 	private:
 		std::string error;
 	};
+	// Called if a list tries to load a tag that doesn't have the ID that the list tag uses.
+	// i.e: (list of byte tags) bytelist.add(new inttag(10));
 	class illegal_list_tag_type : public std::exception {
 	public:
 		char type;
@@ -90,6 +96,8 @@ namespace nbt {
 	private:
 		std::string error;
 	};
+	// Called if a compound or list tag attempts to load a tag with an ID that isn't present.
+	// i.e: the default tag ids (of this library) range from -12 to positive 12
 	class missing_tag_id_exception : public std::exception {
 	public:
 		char id;
@@ -103,6 +111,10 @@ namespace nbt {
 	private:
 		std::string error;
 	};
+	// Only enabled through #define NBT_THROW_ENDLESS
+#ifdef NBT_THROW_ENDLESS
+	// Called if a compound tag attempts to write its data, when it does not have a comppound tag.
+	// i.e: compound tag = compound(); tag.add(new inttag(0)); tag.write(...); (Tag has no end tag, thus is 'endless')
 	class endless_compound_exception : public std::exception {
 	public:
 		endless_compound_exception() {
@@ -114,6 +126,9 @@ namespace nbt {
 	private:
 		std::string error;
 	};
+#endif
+	// Thrown when interacting with a tag_p, and attempting to convert its data to a type it is not.
+	// i.e: tag_p t = tag_p(new inttag(10)); t._byte(); (attempted to cast to byte tag, invalid tag operator)
 	class invalid_tag_operator : public std::exception {
 	public:
 		char id, required_type;
@@ -129,8 +144,9 @@ namespace nbt {
 		std::string error;
 	};
 
+	// Used to grab the byte-data of any T element. Defaults to Big Endian, however can be configured to use little endian
 	template <typename T>
-	int toBytes(T in, char* out) {
+	int toBytes(const T in, char* const out) {
 		try {
 			memcpy_s(out, sizeof(T), (void*)&in, sizeof(T));
 
@@ -146,15 +162,16 @@ namespace nbt {
 		return 0;
 	}
 
+	// Used to cast the binary data of any T object, into a T object. 
 	template <typename T>
-	int fromBytes(char* in, T* out) {
+	int fromBytes(const char* const in, T* const out) {
 		try {
+			memcpy_s(out, sizeof(T), in, sizeof(T));
+
 #ifndef NBT_LITTLE_ENDIAN
 			for (char i = 0; i < sizeof(T) / 2; i++)
-				std::swap(in[i], in[sizeof(T) - 1 - i]);
+				std::swap(((char*)(out))[i], ((char*)(out))[sizeof(T) - 1 - i]);
 #endif
-
-			memcpy_s(out, sizeof(T), in, sizeof(T));
 		}
 		catch (std::exception e) {
 			std::cerr << e.what() << std::endl;
@@ -163,10 +180,12 @@ namespace nbt {
 		return 0;
 	}
 
+	// Convert a regular utf-8 string into a Java Modified-UTF-8 string
 	extern std::string utfToMutf(std::string utf);
-
+	// Convert a Java Modified-UTF-8 string into a regular utf-8 string
 	extern std::string mutfToUtf(std::string mutf);
 
+	// Finally, the class that specifies functions and data used by all types of tags.
 	class tag {
 	public:
 		// The NBT id of the tag
@@ -181,22 +200,33 @@ namespace nbt {
 		/// <param name="bytes">- List of NBT data. Equivelent to a decompressed .dat file.</param>
 		/// <param name="offset">- The position to start reading data from</param>
 		/// <returns>Where the current tag's data ends, and the next tag's data begins.</returns>
-		virtual size_t load(char* bytes, size_t offset = 0) = 0;
+		virtual size_t load(const char* const bytes, size_t offset = 0) = 0;
 		/// <summary>
 		/// Writes tag's data to an output buffer. Buffer is able to then be saved to a file or loaded by other tags.
 		/// </summary>
 		/// <param name="buffer">- Where the tag's data will be written to, make sure it has appropriate space. If given nullptr, this function can be used to get the exact length required for a buffer (FASTER+SAFER TO USE WRITE WITH A LIST INSTEAD OF CHAR ARRAY)</param>
 		/// <param name="offset">- Where the tag should start writing data</param>
 		/// <returns>Where the current tag's data ends, and the next tag's data should begin</returns>
-		virtual size_t write(char* buffer, size_t offset) = 0;
+		virtual size_t write(char* const buffer, size_t offset) = 0;
 		/// <summary>
 		/// Writes tag's data to an extendable output buffer. Buffer is able to then be saved to a file or loaded by other tags.
 		/// </summary>
 		/// <param name="buffer">- Where the tag's data will be written to, pushing back the end of the buffer.</param>
 		/// <returns>Where the current tag's data ends, and the next tag's data should begin</returns>
 		virtual size_t write(std::vector<char>& buffer) = 0;
+		/// <summary>
+		/// Get a vector of chars that represent the data held by this specific tag.
+		/// i.e: An inttag will return chars that represent an int.
+		/// </summary>
 		virtual std::vector<char> value_bytes() = 0;
+		/// <summary>
+		/// Clear the tag's data, always called by the destructor
+		/// </summary>
 		virtual void discard() = 0;
+		/// <summary>
+		/// Returns the correct ID for any tag subclass, used in default write/load functions
+		/// </summary>
+		virtual const int8_t correct_tag() = 0;
 #ifdef NBT_COMPILE
 		virtual std::string compilation(std::string regex = "") = 0;
 		friend std::ostream& operator<< (std::ostream& left, tag* right) {
@@ -206,8 +236,8 @@ namespace nbt {
 #endif
 
 	protected:
-		virtual const int8_t correct_tag() = 0;
-		size_t writeDefault(char* buffer, size_t offset) {
+		// Writes the default header to a buffer at a given offset. Returns the index for the end of a header. Every tag (except for end tags!) use the default header.
+		size_t writeDefault(char* const buffer, size_t offset) {
 			if (buffer == nullptr)
 				return offset + 3 + name.length();
 			// Push the id of the tag
@@ -222,6 +252,7 @@ namespace nbt {
 			memcpy_s(&buffer[offset + 3], namelength, name.data(), namelength);
 			return offset + 3 + namelength;
 		}
+		// Writes the default header, to a vector.
 		size_t writeDefault(std::vector<char>& buffer) {
 			// Push the id of the tag
 			buffer.push_back(id);
@@ -236,7 +267,8 @@ namespace nbt {
 			buffer.insert(buffer.end(), mutf.begin(), mutf.end());
 			return (int32_t)buffer.size();
 		}
-		size_t loadDefault(char* bytes, size_t offset) {
+		// Loads the default header, returning an index to the end of the header. Used by all tags (except for end tags!).
+		size_t loadDefault(const char const* bytes, size_t offset) {
 			// Grabs the id of the tag
 			id = bytes[offset];
 
@@ -256,29 +288,50 @@ namespace nbt {
 		}
 	};
 
-	extern std::map<int8_t, std::string> tagNames;
+	/*
+	A list of constructor functions, mapped to the ID of the tag the constructor creates. This list is used by list and compound tags, in order to quickly call
+	the correct tag's constructor based on a given ID. (Read compound::load or list::load for examples)
+
+	This both makes the code a little simpler (lookup table instead of, say, a switch statement spanning 50 lines) while also making room for custom tags.
+
+	For example, if the user creates a tag class (child of nbt::tag,) with a unique ID, they may make it a recognized and valid tag that will be created by 
+	list tags and compounds.
+
+	Example:
+	class pointertag : public tag {
+		- tag class data -
+	}
+	// Then, before any compound::load calls are made,
+	registerTag<pointertag>(15); // Registers a "pointertag" with the id 15.
+
+	This is made even simpler with primitivetags and primitivearraytags, see comments near those classes for details.
+	*/
 	extern std::map<int8_t, tag* (*)()> tagConstructors;
+
+	// Used to essentially reference a class's default constructor
 	template <class T>
 	T* create() {
 		return new T;
 	}
 
+	// Register's a tag class (T) to 'tagConstructors' with the given ID.
 	template <typename T>
 	void registerTag(int8_t id) {
 		tagConstructors.insert(std::make_pair(id, (tag * (*)()) create<T>));
 	}
 
+	// A function and state variable called by compound and list tags in order to register the default set of tags.
 	static bool registeredDefaultTags = false;
 	static void registerDefaultTags();
 
+	// The end class stores no data, but signals a compound tag when it is time to stop reading data. Like a null-terminated string. Very self explanitory in all it does.
 	class end : public tag {
 	public:
 		end() {
 			id = 0;
 			name = "";
 		}
-
-		size_t load(char* bytes, size_t offset) {
+		size_t load(const char* const bytes, size_t offset) {
 			return offset + 1;
 		}
 		size_t write(std::vector<char>& buffer) {
@@ -298,6 +351,8 @@ namespace nbt {
 			name.clear();
 		}
 
+		const int8_t correct_tag() { return 0; }
+
 #ifdef NBT_COMPILE
 		std::string compilation(std::string regex = "") {
 			return regex + "END\n";
@@ -307,11 +362,17 @@ namespace nbt {
 			return left;
 		}
 #endif
-	private:
-		const int8_t correct_tag() { return 0; }
 	};
 
-	// Abstract class used for primive tags such as: IntTag, FloatTag, ByteTag, DoubleTag, etc.
+	/*
+	Abstract class used for primive tags such as : IntTag, FloatTag, ByteTag, DoubleTag, etc.
+
+	All "primitive data tags" use essentially the same code. 
+	They read data the same way, write it the same way, and store just one single instance of a given type,
+	just with different data lengths and IDs.
+
+	So the class is templated, and all default primitive data tags are just type definitions of it.
+	*/
 	template <typename T, int8_t ID>
 	class primitivetag : public tag {
 	public:
@@ -342,17 +403,17 @@ namespace nbt {
 			this->name = t->name;
 		}
 
-		size_t load(char* bytes, size_t offset) {
+		size_t load(const char* const bytes, size_t offset) {
 			size_t off = loadDefault(bytes, offset);
 
 			// Use primitive casting to convert the data (in bytes) to the data (as a primitive)
-			// This allows us to use floating point types with primitive tag. The other way to convert to primitive (by using byte shifting "<<") will only convert to integer types
+			// This allows us to use floating point types with primitive tag. The other way to convert to primitive (by using bit shifting "<<") will only convert to integer types
 			fromBytes<T>(&bytes[off], &data);
 
 			//Return where the next tag will start in bytes[]
 			return off + sizeof(T);
 		}
-		size_t write(char* buffer, size_t offset) {
+		size_t write(char* const buffer, size_t offset) {
 			size_t off = writeDefault(buffer, offset);
 			if (buffer == nullptr)
 				return off + sizeof(T);
@@ -397,7 +458,12 @@ namespace nbt {
 			return this;
 		}
 
+		const int8_t correct_tag() {
+			return ID;
+		}
+
 #ifdef NBT_COMPILE
+		// The only problem with a primitive tag is that you cannot easily specify the name of each tag in compilation. Thus we just define default names and call everything else "custom"
 		std::string compilation(std::string regex = "") {
 			std::string type = "";
 			if (typeid(T) == typeid(int8_t) || typeid(T) == typeid(uint8_t))
@@ -422,14 +488,9 @@ namespace nbt {
 			return left;
 		}
 #endif
-
-	private:
-		// Compares the current tag-id to what the tag is
-		const int8_t correct_tag() {
-			return ID;
-		}
 	};
 
+	// Similar to primitivetag, but storing arrays (vectors) of primitive types instead of a single instance.
 	template <typename T, int8_t ID>
 	class primitivearraytag : public tag {
 	public:
@@ -453,14 +514,14 @@ namespace nbt {
 			this->data = data;
 			this->name = name;
 		}
-		primitivearraytag(tag* tag) : primitivearraytag() {
-			primitivearraytag<T>* t = dynamic_cast<primitivearraytag<T>*>(tag);
+		primitivearraytag(const tag* const tag) : primitivearraytag() {
+			const primitivearraytag<T>* const t = dynamic_cast<const primitivearraytag<T>* const>(tag);
 			this->data = t->data;
 			this->id = t->id;
 			this->name = t->name;
 		}
 
-		size_t load(char* bytes, size_t offset) {
+		size_t load(const char* const bytes, size_t offset) {
 			size_t off = loadDefault(bytes, offset);
 
 			// Get the amount of elements in the array
@@ -480,7 +541,7 @@ namespace nbt {
 			}
 			return off;
 		}
-		size_t write(char* buffer, size_t offset) {
+		size_t write(char* const buffer, size_t offset) {
 			size_t off = writeDefault(buffer, offset);
 			if (buffer == nullptr)
 				return off + 4 * sizeof(T) * data.size();
@@ -535,8 +596,11 @@ namespace nbt {
 			name.clear();
 		}
 		// CONVERSIONS AND SYNTAX SIMPLIFICATION
+
+		// primitivearraytag<int, 3> intarray; intarray << 10; intarray << 12;
+		// Not sure why this operator isn't used by vectors and stack-like data structures in general, tbh.
 		void operator<<(T t) {
-			data.push_back(t);
+			data.push_back(t);		
 		}
 		T operator[](size_t i) {
 			return data[i];
@@ -544,10 +608,13 @@ namespace nbt {
 		operator std::vector<T>() {
 			return data;
 		}
-		//operator T* () {
-			//return &data[0];
-		//}
+
+		const int8_t correct_tag() {
+			return ID;
+		}
+
 #ifdef NBT_COMPILE
+		// See primitivetag for complaints on nbt-compilation with template classes!
 		std::string compilation(std::string regex = "") {
 			std::string type = "";
 			if (typeid(T) == typeid(int8_t) || typeid(T) == typeid(uint8_t))
@@ -562,6 +629,7 @@ namespace nbt {
 				type = "Custom";
 			std::string out = regex + type + "ArrayTag(" + std::string(name) + "): " + std::to_string(data.size()) + " " + type + "s \n";
 #ifdef NBT_COMPILE_FULL_ARRAYS
+			// By default, arrays don't spew out their contents when being printed, but it is an option you can toggle on.
 			for (unsigned int i = 0; i < data.size(); i++) {
 				out += regex + "\t" + std::to_string(data[i]) + "\n";
 			}
@@ -573,15 +641,10 @@ namespace nbt {
 			return left;
 		}
 #endif
-
-	private:
-		// Compares the current tag-id to what the tag is
-		const int8_t correct_tag() {
-			return ID;
-		}
 	};
 
-	// Unsigned tags are just for storage and data purposes, it does not change the reading and writing code
+	// All of the primitive data tags that are present by default with this library.
+	// Unsigned tags are not defined by the NBT standard, they are present here by my choice, as it just makes sense to be able to store unsigned data types with NBT
 	typedef primitivetag<int8_t, 1> bytetag;			//1
 	typedef primitivetag<uint8_t, -1> ubytetag;
 
@@ -607,6 +670,7 @@ namespace nbt {
 	typedef primitivearraytag<int64_t, 12> longarray;	//12
 	typedef primitivearraytag<uint64_t, -12> ulongarray;
 
+	// Honestly not much to say here. Strings in NBT files are lenght-based rather than null-terminated, so this class reads the length of the string before the string itself.
 	class stringtag : public tag {
 	public:
 		std::string data;
@@ -621,25 +685,25 @@ namespace nbt {
 			this->name = name;
 			this->data = data;
 		}
-		stringtag(tag* tag) {
-			stringtag* t = dynamic_cast<stringtag*>(tag);
+		stringtag(const tag* const tag) {
+			const stringtag* const t = dynamic_cast<const stringtag* const>(tag);
 			this->data = t->data;
 			this->id = t->id;
 			this->name = t->name;
 		}
-		size_t load(char* bytes, size_t offset) {
+		size_t load(const char* const bytes, size_t offset) {
 			size_t off = loadDefault(bytes, offset);
 
 			// Load the size of the string
 			uint16_t datlength = 0;
 			fromBytes(&bytes[off], &datlength);
 			// Copy the string out of the bytes nbt data array
-			data = mutfToUtf(std::string((const char*)&bytes[off + 2], datlength));
+			data = mutfToUtf(std::string(&bytes[off + 2], datlength));
 
 			//Return where the next tag will start in bytes[]
 			return off + 2 + datlength;
 		}
-		size_t write(char* buffer, size_t offset) {
+		size_t write(char* const buffer, size_t offset) {
 			size_t off = writeDefault(buffer, offset);
 			std::string mutf = utfToMutf(data);
 			if (buffer == nullptr)
@@ -695,6 +759,9 @@ namespace nbt {
 			return this;
 		}
 
+		const int8_t correct_tag() {
+			return 8;
+		}
 #ifdef NBT_COMPILE
 		std::string compilation(std::string regex = "") {
 			std::string out = regex + "StringTag(" + std::string(name) + "): " + data + "\n";
@@ -705,16 +772,29 @@ namespace nbt {
 			return left;
 		}
 #endif
-	private:
-		const int8_t correct_tag() {
-			return 8;
-		}
 	};
 
+	// Forward declaration, compounds and lists are used in tag_p class, and tag_p is used in compound and list classes
 	class compound;
 	class list;
 
-	// Interface class that lets you cast between types without unsafe casting, or having to write dynamic_cast<tagtype> every line
+	/*
+	Interface class that lets you cast between types without unsafe casting, or having to write dynamic_cast<tagtype> every line
+	
+	For instance, any subclass of nbt::tag can be referenced and stored as a (tag*)
+	The tag_p class takes a (tag*) and gives you functions and operators that allow you to easily interact with the data of the actual tag,
+	without having to specify that you are trying to talk to an inttag instead of a generic tag*
+
+	Example:
+	std::vector<tag*> tag_list = std::vector<tag*>();
+	tag_list.push(new inttag("int tag one", 10));
+	tag_list.push(new inttag("int tag two", 20));
+
+	dynamic_cast<inttag*>(tag_list[0]).value; // 10, clunky bad way!
+	tag_p(tag_list[0])._int(); // 20, made even better if tag_list was a std::vector<tag_p>();
+
+	See compound and list tag classes for the usages of tag_p.
+	*/
 	class tag_p {
 	public:
 		tag* value;
@@ -722,55 +802,100 @@ namespace nbt {
 			value = nullptr;
 		}
 		tag_p(tag* value) : value(value) {}
+		/*
+		* When you grab a compound tag from a parent compound tag, you may then instantly grab contents from it without having to specify that it is a compound tag.
+		* For example, in this dataset (given in JSON) you'll see the data we want, and where it is stored
+		*	"data": {
+		*		"data compound": {
+		*			"data we want": ":)"
+		*		}
+		*	}
+		* 
+		* This operator lets us write:
+		* data["data compound"]["data we want"] without any errors.
+		*/
 		tag_p& operator [](std::string key);
+		/*
+		* Similar to the above operation, but for list tags.
+		*	"data": {
+		*		"data list": ["data1", "data2", "data3"]
+		*	}
+		*
+		* data["data list"][1]
+		*/
 		tag_p& operator [](size_t index);
+		/* 
+		* Allows pointer operations, like
+		* tag_p data = tag_p(new inttag("name", 10));
+		* data->name; // Valid
+		* data->id; // Valid
+		*/
 		tag* operator->() {
 			return value;
 		}
 		void discard() {
-			value->discard();
-			delete value;
+			if (value) {
+				value->discard();
+				delete value;
+			}
 			value = nullptr;
 		}
 
+		/*
+		* The big mess of conversions. 
+		* The syntax is temporary, but what it does is self explanitory.
+		* 
+		* The _byte() function, attempts to cast the tag* value to a bytetag* value, and return the int8_t that is stored within it.
+		* The _bytetag() function, attempts to cast the tag* value to a bytetag* value, and return that casted value.
+		* (Throws invalid_tag_operator if the value was not actually the requested tag type)
+		*/
 		int8_t& _byte() { if (value->id != 1) throw invalid_tag_operator(value->id, 1); return dynamic_cast<bytetag*>(value)->data; }
-		uint8_t& _ubyte() { if (value->id != 1) throw invalid_tag_operator(value->id, 1); return dynamic_cast<ubytetag*>(value)->data; }
+		uint8_t& _ubyte() { if (value->id != -1) throw invalid_tag_operator(value->id, -1); return dynamic_cast<ubytetag*>(value)->data; }
 		int16_t& _short() { if (value->id != 2) throw invalid_tag_operator(value->id, 2); return dynamic_cast<shorttag*>(value)->data; }
-		uint16_t& _ushort() { if (value->id != 2) throw invalid_tag_operator(value->id, 2); return dynamic_cast<ushorttag*>(value)->data; }
+		uint16_t& _ushort() { if (value->id != -2) throw invalid_tag_operator(value->id, -2); return dynamic_cast<ushorttag*>(value)->data; }
 		int32_t& _int() { if (value->id != 3) throw invalid_tag_operator(value->id, 3); return dynamic_cast<inttag*>(value)->data; }
-		uint32_t& _uint() { if (value->id != 3) throw invalid_tag_operator(value->id, 3); return dynamic_cast<uinttag*>(value)->data; }
+		uint32_t& _uint() { if (value->id != -3) throw invalid_tag_operator(value->id, -3); return dynamic_cast<uinttag*>(value)->data; }
 		int64_t& _long() { if (value->id != 4) throw invalid_tag_operator(value->id, 4); return dynamic_cast<longtag*>(value)->data; }
-		uint64_t& _ulong() { if (value->id != 4) throw invalid_tag_operator(value->id, 4); return dynamic_cast<ulongtag*>(value)->data; }
+		uint64_t& _ulong() { if (value->id != -4) throw invalid_tag_operator(value->id, -4); return dynamic_cast<ulongtag*>(value)->data; }
 		float& _float() { if (value->id != 5) throw invalid_tag_operator(value->id, 5); return dynamic_cast<floattag*>(value)->data; }
 		double& _double() { if (value->id != 6) throw invalid_tag_operator(value->id, 6); return dynamic_cast<doubletag*>(value)->data; }
 		std::vector<int8_t>& _bytearray() { if (value->id != 7) throw invalid_tag_operator(value->id, 7); return dynamic_cast<bytearray*>(value)->data; }
-		std::vector<uint8_t>& _ubytearray() { if (value->id != 7) throw invalid_tag_operator(value->id, 7); return dynamic_cast<ubytearray*>(value)->data; }
+		std::vector<uint8_t>& _ubytearray() { if (value->id != -7) throw invalid_tag_operator(value->id, -7); return dynamic_cast<ubytearray*>(value)->data; }
 		std::vector<int32_t>& _intarray() { if (value->id != 11) throw invalid_tag_operator(value->id, 11); return dynamic_cast<intarray*>(value)->data; }
-		std::vector<uint32_t>& _uintarray() { if (value->id != 11) throw invalid_tag_operator(value->id, 11); return dynamic_cast<uintarray*>(value)->data; }
+		std::vector<uint32_t>& _uintarray() { if (value->id != -11) throw invalid_tag_operator(value->id, -11); return dynamic_cast<uintarray*>(value)->data; }
 		std::vector<int64_t>& _longarray() { if (value->id != 12) throw invalid_tag_operator(value->id, 12); return dynamic_cast<longarray*>(value)->data; }
-		std::vector<uint64_t>& _ulongarray() { if (value->id != 12) throw invalid_tag_operator(value->id, 12); return dynamic_cast<ulongarray*>(value)->data; }
+		std::vector<uint64_t>& _ulongarray() { if (value->id != -12) throw invalid_tag_operator(value->id, -12); return dynamic_cast<ulongarray*>(value)->data; }
 		std::string& _string() { if (value->id != 8) throw invalid_tag_operator(value->id, 8); return dynamic_cast<stringtag*>(value)->data; }
 
 		bytetag& _bytetag() { if (value->id != 1) throw invalid_tag_operator(value->id, 1); return *dynamic_cast<bytetag*>(value); }
-		ubytetag& _ubytetag() { if (value->id != 1) throw invalid_tag_operator(value->id, 1); return *dynamic_cast<ubytetag*>(value); }
+		ubytetag& _ubytetag() { if (value->id != -1) throw invalid_tag_operator(value->id, -1); return *dynamic_cast<ubytetag*>(value); }
 		shorttag& _shorttag() { if (value->id != 2) throw invalid_tag_operator(value->id, 2); return *dynamic_cast<shorttag*>(value); }
-		ushorttag& _ushorttag() { if (value->id != 2) throw invalid_tag_operator(value->id, 2); return *dynamic_cast<ushorttag*>(value); }
+		ushorttag& _ushorttag() { if (value->id != -2) throw invalid_tag_operator(value->id, -2); return *dynamic_cast<ushorttag*>(value); }
 		inttag& _inttag() { if (value->id != 3) throw invalid_tag_operator(value->id, 3); return *dynamic_cast<inttag*>(value); }
-		uinttag& _uinttag() { if (value->id != 3) throw invalid_tag_operator(value->id, 3); return *dynamic_cast<uinttag*>(value); }
+		uinttag& _uinttag() { if (value->id != -3) throw invalid_tag_operator(value->id, -3); return *dynamic_cast<uinttag*>(value); }
 		longtag& _longtag() { if (value->id != 4) throw invalid_tag_operator(value->id, 4); return *dynamic_cast<longtag*>(value); }
-		ulongtag& _ulongtag() { if (value->id != 4) throw invalid_tag_operator(value->id, 4); return *dynamic_cast<ulongtag*>(value); }
+		ulongtag& _ulongtag() { if (value->id != -4) throw invalid_tag_operator(value->id, -4); return *dynamic_cast<ulongtag*>(value); }
 		floattag& _floattag() { if (value->id != 5) throw invalid_tag_operator(value->id, 5); return *dynamic_cast<floattag*>(value); }
 		doubletag& _doubletag() { if (value->id != 6) throw invalid_tag_operator(value->id, 6); return *dynamic_cast<doubletag*>(value); }
 		bytearray& _bytearraytag() { if (value->id != 7) throw invalid_tag_operator(value->id, 7); return *dynamic_cast<bytearray*>(value); }
-		ubytearray& _ubytearraytag() { if (value->id != 7) throw invalid_tag_operator(value->id, 7); return *dynamic_cast<ubytearray*>(value); }
+		ubytearray& _ubytearraytag() { if (value->id != -7) throw invalid_tag_operator(value->id, -7); return *dynamic_cast<ubytearray*>(value); }
 		intarray& _intarraytag() { if (value->id != 11) throw invalid_tag_operator(value->id, 11); return *dynamic_cast<intarray*>(value); }
-		uintarray& _uintarraytag() { if (value->id != 11) throw invalid_tag_operator(value->id, 11); return *dynamic_cast<uintarray*>(value); }
+		uintarray& _uintarraytag() { if (value->id != -11) throw invalid_tag_operator(value->id, -11); return *dynamic_cast<uintarray*>(value); }
 		longarray& _longarraytag() { if (value->id != 12) throw invalid_tag_operator(value->id, 12); return *dynamic_cast<longarray*>(value); }
-		ulongarray& _ulongarraytag() { if (value->id != 12) throw invalid_tag_operator(value->id, 12); return *dynamic_cast<ulongarray*>(value); }
+		ulongarray& _ulongarraytag() { if (value->id != -12) throw invalid_tag_operator(value->id, -12); return *dynamic_cast<ulongarray*>(value); }
 		stringtag& _stringtag() { if (value->id != 8) throw invalid_tag_operator(value->id, 8); return *dynamic_cast<stringtag*>(value); }
+		// Forward declared because the bodies of compound and list classes have not been defined yet
 		compound& _compound();
 		list& _list();
 #ifdef NBT_SHORTHAND
+		/*
+		* As you understand the convestion functions, you may use the shorthand versions instead to shorten your code, and potentially make it more readable.
+		* As long as you understand which functions are which, and what does what 
+		* 
+		* Every function is the initials of the previous set of functions returned, with only a few exceptions
+		* - str() and strt() are used to return string and stringtag. As 's' and 'st' are taken by shorts and short tags
+		* - li() is used to return a list, as 'l' is taken by long and long tags.
+		*/
 		int8_t& b() { return _byte(); }
 		uint8_t& ub() { return _ubyte(); }
 		int16_t& s() { return _short(); }
@@ -817,6 +942,13 @@ namespace nbt {
 #endif
 	};
 
+
+	/*
+	* A list tag stores a list of same-type tags.
+	* Each tag read will not have a name, and will only be referenced by their index.
+	* Despite the fact that it will only store a single type of tag in its data, it still uses tag_p instead of being a template.
+	* As template<typename T> class list ... requires that you specify the typename of T whenever you reference the list class, even when casting to a list.
+	*/
 	class list : public tag {
 	public:
 		std::vector<tag_p> tags;
@@ -849,16 +981,18 @@ namespace nbt {
 				tag_type = tags[0]->id;
 			id = 9;
 		}
-		list(tag* tag) {
-			list* t = dynamic_cast<list*>(tag);
+		list(const tag* const tag) {
+			// IS NOT A CAST FUNCTION!
+			// This is a copy constructor, and assumes that the input tag* is a list*.
+			const list* const t = dynamic_cast<const list* const>(tag);
 			this->tags = t->tags;
 			this->id = 9;
 			this->tag_type = t->tag_type;
 			this->name = t->name;
 		}
+		// Passthrough function
 		void clear() {
 			this->tags.clear();
-			name = "";
 		}
 		void discard() {
 			name.clear();
@@ -867,8 +1001,33 @@ namespace nbt {
 				it = tags.erase(it);
 			}
 		}
-		size_t load(char* bytes, size_t offset);
-		size_t write(char* buffer, size_t offset) {
+
+		size_t load(const char* const bytes, size_t offset) {
+			// Make sure all tags are registered
+			registerDefaultTags();
+
+			size_t off = loadDefault(bytes, offset);
+			tag_type = bytes[off];
+
+			if (tagConstructors.find(tag_type) == tagConstructors.end())
+				throw missing_tag_id_exception(tag_type);
+
+			uint32_t length = 0;
+			fromBytes(&bytes[++off], &length);
+			off += 4;
+			tag* tag;
+			for (uint32_t i = 0; i < length; i++) {
+				tag = (*tagConstructors[tag_type])();
+				// SHHHH don't tell anyone that I casted away the const!
+				const_cast<char* const>(bytes)[off - 3] = NBT_BYPASS_ID;
+				const_cast<char* const>(bytes)[off - 2] = 0x00;
+				const_cast<char* const>(bytes)[off - 1] = 0x00;
+				off = tag->load(bytes, off - 3);
+				tags.push_back(tag);
+			}
+			return off;
+		}
+		size_t write(char* const buffer, size_t offset) {
 			// Push the id of the tag
 			size_t off = writeDefault(buffer, offset);
 
@@ -910,22 +1069,33 @@ namespace nbt {
 			return buffer;
 		}
 
+		void add(tag_p t) {
+			if (tag_type == NBT_BYPASS_ID)
+				tag_type = t->correct_tag();
+			if (t->correct_tag() != tag_type)
+				throw illegal_list_tag_type(t->correct_tag());
+			else
+				tags.push_back(t);
+		}
+
 		// SYNTAX AND CODE SIMPLIFICATION
 
-		tag_p operator[](size_t i) {
-			return tags[i];
+		// list[1]
+		tag_p& operator[](size_t i) {
+			// vector::at throws std::out_of_range if input is, well, out of range.
+			return tags.at(i);
 		}
 		operator std::vector<tag_p>() {
 			return tags;
 		}
 		void operator<<(tag_p t) {
-			if (tag_type == NBT_BYPASS_ID)
-				tag_type = t->id;
-			if (t->id != tag_type)
-				throw illegal_list_tag_type(t->id);
-			else
-				tags.push_back(t);
+			add(t);
 		}
+
+		const int8_t correct_tag() {
+			return 9;
+		}
+
 #ifdef NBT_COMPILE
 		std::string compilation(std::string regex = "") {
 			std::string out = regex + "ListTag(" + std::string(name) + "): " + std::to_string(tags.size()) + " tags {\n";
@@ -941,14 +1111,10 @@ namespace nbt {
 			return left;
 		}
 #endif
-	private:
-		const int8_t correct_tag() {
-			return 9;
-		}
 	};
 
 	/*
-	The NBT Compound Tag is the starting point of all NBT datasets. It stores a list of Tags, referenced to by their names. Therefore, they store tags using an std::map.
+	The NBT Compound Tag is the starting point of all NBT datasets. It stores a list of Tags, mapped to their names. Therefore, they store tags using an std::map.
 	Because all of the tags are unique classes, the Compound Tag instead stores pointers to the nbt::tag superclass in the form of the tag_p interface class.
 
 	tag_p is how you would mostly be interacting with the API, that would be where to read next.
@@ -979,9 +1145,9 @@ namespace nbt {
 			this->name = name;
 			id = 10;
 		}
-		compound(tag* tag) {
-			// Note: Creates a new compound tag, and is not the same thing as a cast. Instead, use tag_p in order to cast between types.
-			compound* t = dynamic_cast<compound*>(tag);
+		compound(const tag* const tag) {
+			// Note: Creates a new compound tag, and is not the same thing as a cast. Instead, use tag_p in order to interact between types.
+			const compound* const t = dynamic_cast<const compound* const>(tag);
 			this->tags = t->tags;
 			this->id = 10;
 			this->name = t->name;
@@ -995,11 +1161,12 @@ namespace nbt {
 			}
 		}
 
-		size_t load(char* bytes, size_t offset) {
-			// Make sure all tags are registered, required in order to use default tag types.
+		// Loads compound tag data from a list of bytes
+		size_t load(const char* const bytes, size_t offset) {
+			// Make sure all tags are registered, required in order to use the provided default tag types.
 			registerDefaultTags();
 
-			size_t off = loadDefault(bytes, offset); // Loads default Tag header.
+			size_t off = loadDefault(bytes, offset);
 			char t;
 			tag* tag;
 			while (true) {
@@ -1016,7 +1183,7 @@ namespace nbt {
 			}
 			return off + 1;
 		}
-		size_t write(char* buffer, size_t offset) {
+		size_t write(char* const buffer, size_t offset) {
 			// Writes default tag header.
 			size_t off = writeDefault(buffer, offset);
 
@@ -1050,7 +1217,7 @@ namespace nbt {
 			return buffer.size();
 		}
 		std::vector<char> value_bytes() {
-			// Same as write(buffer), however it provides it's own buffer, and doesn't write it's own header. Rather, provides the written data of all contained tags.
+			// Provides the data of all contained tags, essentially a write without the default header.
 			std::vector<char> buffer = std::vector<char>();
 			for (auto i = tags.begin(); i != tags.end(); i++)
 				if (i->second->id != 0)
@@ -1059,10 +1226,10 @@ namespace nbt {
 			return buffer;
 		}
 
-		tag_p get(const char* name) {
-			if (tags.count(name) == 0)
-				return nullptr;
-			return tags[name];
+		tag_p& get(const char* name) {
+			// Could check for missing keys, however std::map::at does that already (compared to operator[] which returns a default constructor if key not found)
+			// if (tags.count(name) == 0)
+			return tags.at(name);
 		}
 
 		void add(tag_p tag) {
@@ -1072,7 +1239,7 @@ namespace nbt {
 		// SYNTAX AND CODE SIMPLIFICATION
 
 		// compound["sub tag"]
-		tag_p operator[](const char* name) {
+		tag_p& operator[](const char* name) {
 			return get(name);
 		}
 		// compound().begin()
@@ -1087,6 +1254,9 @@ namespace nbt {
 			return tags.size();
 		}
 
+		const int8_t correct_tag() {
+			return 10;
+		}
 #ifdef NBT_COMPILE
 		// Returns a string that can be useful for debugging
 		std::string compilation(std::string regex = "") {
@@ -1104,10 +1274,6 @@ namespace nbt {
 			return (left << right.compilation());
 		}
 #endif
-	private:
-		const int8_t correct_tag() {
-			return 10;
-		}
 	};
 
 #ifdef NBT_SHORTHAND
@@ -1160,12 +1326,21 @@ namespace nbt {
 		nbt::registeredDefaultTags = true;
 	}
 }
-
+//#define NBT_INCLUDE
+// Again, define on first include! Defines a few necessary functions
 #ifdef NBT_INCLUDE
 #undef NBT_INCLUDE
 
+/*
+* This function really deserves it's own smaller library, honestly.
+* Converts from the normal global UTF-8 to the "Modified UTF-8" used in Java.
+* https://docs.oracle.com/javase/6/docs/api/java/io/DataInput.html#modified-utf-8 is the only official documentation of Modified UTF-8
+* Pretty simple conversion, but annoying, and uses <codecvt> to make things a little simpler.
+* 
+* Essentially goes from UTF-8, to 32-bit Unicode, to MUTF-8.
+*/
 std::string nbt::utfToMutf(std::string utf) {
-#ifdef NTB_IGNORE_MUTF
+#ifdef NBT_IGNORE_MUTF
 	return utf;
 #else
 	std::string out = "";
@@ -1208,6 +1383,9 @@ std::string nbt::utfToMutf(std::string utf) {
 #endif
 }
 
+/*
+* See previous function! Goes from MUTF-8 to 32-bit Unicode to UTF-8
+*/
 std::string nbt::mutfToUtf(std::string mutf) {
 #ifdef NBT_IGNORE_MUTF
 	return mutf;
@@ -1237,44 +1415,18 @@ std::string nbt::mutfToUtf(std::string mutf) {
 #endif
 }
 
-std::map<int8_t, std::string> nbt::tagNames = std::map<int8_t, std::string>();
 std::map<int8_t, nbt::tag* (*)()> nbt::tagConstructors = std::map<int8_t, nbt::tag* (*)()>();
 
+
+// Define the forwarded operators and functions from tag_p.
 nbt::tag_p& nbt::tag_p::operator[](std::string key) {
-	compound* comp = dynamic_cast<compound*>(value);
-	return comp->tags[key];
+	return _compound()[key.c_str()];
 }
 nbt::tag_p& nbt::tag_p::operator[](size_t index) {
-	list* lis = dynamic_cast<list*>(value);
-	return lis->tags[index];
+	return _list()[index];
 }
 nbt::compound& nbt::tag_p::_compound() { if (value->id != 10) throw invalid_tag_operator(value->id, 10); return *dynamic_cast<compound*>(value); }
 nbt::list& nbt::tag_p::_list() { if (value->id != 9) throw invalid_tag_operator(value->id, 9); return *dynamic_cast<list*>(value); }
 
-size_t nbt::list::load(char* bytes, size_t offset) {
-	// Make sure all tags are registered
-	registerDefaultTags();
-
-	size_t off = loadDefault(bytes, offset);
-	tag_type = bytes[off];
-
-	//if (tag_type == 0)
-	//	throw illegal_list_tag_type(0);
-	if (tagConstructors.find(tag_type) == tagConstructors.end())
-		throw missing_tag_id_exception(tag_type);
-
-	uint32_t length = 0;
-	fromBytes(&bytes[++off], &length);
-	off += 4;
-	tag* tag;
-	for (uint32_t i = 0; i < length; i++) {
-		tag = (*tagConstructors[tag_type])();
-		bytes[off - 3] = NBT_BYPASS_ID;
-		bytes[off - 2] = 0x00;
-		bytes[off - 1] = 0x00;
-		off = tag->load(bytes, off - 3);
-		tags.push_back(tag);
-	}
-	return off;
-}
+//size_t nbt::list::load(const char* const bytes, size_t offset) 
 #endif
