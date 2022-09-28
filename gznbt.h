@@ -40,6 +40,7 @@ namespace nbt {
 				ret = deflate(&stream, flush);
 
 				out->insert(out->end(), &tmpOut[0], &tmpOut[NBT_CHUNK - stream.avail_out]);
+				delete[] tmpOut;
 			} while (stream.avail_out == 0);
 			
 			assert(stream.avail_in == 0);
