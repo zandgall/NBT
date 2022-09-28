@@ -824,6 +824,10 @@ namespace nbt {
 		* data["data list"][1]
 		*/
 		tag_p& operator [](size_t index);
+		/*
+		* Lets you directly check if a compound has a given key
+		*/
+		bool has(std::string key);
 		/* 
 		* Allows pointer operations, like
 		* tag_p data = tag_p(new inttag("name", 10));
@@ -1232,6 +1236,10 @@ namespace nbt {
 			return tags.at(name);
 		}
 
+		bool has(const char* name) {
+			return tags.count(name);
+		}
+
 		void add(tag_p tag) {
 			tags.insert(std::make_pair(tag->name, tag));
 		}
@@ -1424,6 +1432,9 @@ nbt::tag_p& nbt::tag_p::operator[](std::string key) {
 }
 nbt::tag_p& nbt::tag_p::operator[](size_t index) {
 	return _list()[index];
+}
+bool nbt::tag_p::has(std::string key) {
+	return _compound().has(key.c_str());
 }
 nbt::compound& nbt::tag_p::_compound() { if (value->id != 10) throw invalid_tag_operator(value->id, 10); return *dynamic_cast<compound*>(value); }
 nbt::list& nbt::tag_p::_list() { if (value->id != 9) throw invalid_tag_operator(value->id, 9); return *dynamic_cast<list*>(value); }
