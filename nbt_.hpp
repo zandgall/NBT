@@ -1,3 +1,4 @@
+
 /*
 
 THE CURRENT CODE IS NOT FULLY COMMENTED. There are a few comments here and there, but it is very much a work in progress. Enter at your own risk of confusion!
@@ -13,9 +14,9 @@ Strings in NBT use the Java Modified-UTF-8 codec. Don't ask me why, NBT was orig
 An NBT Compound tag may be used, just like a JSON object, to store various primitive types in the form of other NBT tags.
 The Compound tag is the first place to start.
 
- - Zander
+ - Zand
 
-- Video essay on the specifics of NBT - https://youtu.be/12PAtF2Ih_c
+- Video on the specifics of NBT - https://youtu.be/12PAtF2Ih_c
 - Wiki.vg documentation on NBT - https://wiki.vg/NBT
 - Original NBT specification (archive) - https://web.archive.org/web/20110723210920/http://www.minecraft.net/docs/NBT.txt
 
